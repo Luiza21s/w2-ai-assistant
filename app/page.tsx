@@ -5,6 +5,16 @@ import { Plus, MessageSquare, Settings, Copy, Check, Send, Sparkles, PenLine, Pe
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
 import {
@@ -60,6 +70,10 @@ export default function HomePage() {
   const [sendError, setSendError] = useState<string | null>(null)
   const [editingChatId, setEditingChatId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
+  const [chatToDelete, setChatToDelete] = useState<{
+    id: string
+    title: string
+  } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
@@ -169,6 +183,12 @@ export default function HomePage() {
         void handleSelectChat(nextChatId)
       }
     }
+  }
+
+  const confirmDeleteChat = async () => {
+    if (!chatToDelete) return
+    await handleDeleteChat(chatToDelete.id)
+    setChatToDelete(null)
   }
 
   const startRenamingChat = (chatId: string, title: string) => {
@@ -439,7 +459,7 @@ export default function HomePage() {
                       title="Удалить"
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleDeleteChat(chat.id)
+                        setChatToDelete({ id: chat.id, title: chat.title })
                       }}
                       className="p-1 hover:bg-sidebar-border rounded"
                     >
@@ -620,6 +640,32 @@ export default function HomePage() {
       </main>
 
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      <AlertDialog
+        open={chatToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setChatToDelete(null)
+        }}
+      >
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить чат?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Чат «{chatToDelete?.title}» и все его сообщения будут удалены
+              без возможности восстановления.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => void confirmDeleteChat()}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
         </>
       )}
     </div>
