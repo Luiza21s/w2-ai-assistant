@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
+import { createSession, saveMessage, updateSessionTitle } from "@/lib/chat-db"
+import { isSupabaseConfigured } from "@/lib/supabase"
 
 interface Message {
   id: string
@@ -31,11 +33,33 @@ type ApiChatResponse = {
   error?: string
 }
 
+function createLocalChat(): Chat {
+  return {
+    id: Date.now().toString(),
+    title: "Новый чат",
+    messages: [],
+  }
+}
+
+async function createNewChat(): Promise<Chat> {
+  if (isSupabaseConfigured()) {
+    const session = await createSession("Новый чат")
+    if (session) {
+      return {
+        id: session.id,
+        title: session.title,
+        messages: [],
+      }
+    }
+  }
+
+  return createLocalChat()
+}
+
 export default function HomePage() {
-  const [chats, setChats] = useState<Chat[]>([
-    { id: "1", title: "Новый чат", messages: [] }
-  ])
-  const [activeChatId, setActiveChatId] = useState("1")
+  const [chats, setChats] = useState<Chat[]>([])
+  const [activeChatId, setActiveChatId] = useState("")
+  const [isInitializing, setIsInitializing] = useState(true)
   const [input, setInput] = useState("")
   const [selectedText, setSelectedText] = useState("")
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null)
@@ -59,6 +83,24 @@ export default function HomePage() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function initChat() {
+      const chat = await createNewChat()
+      if (cancelled) return
+      setChats([chat])
+      setActiveChatId(chat.id)
+      setIsInitializing(false)
+    }
+
+    void initChat()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const toggleTheme = () => {
     setIsDark(prev => {
       const newValue = !prev
@@ -77,27 +119,19 @@ export default function HomePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [activeChat?.messages])
 
-  const handleNewChat = () => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: "Новый чат",
-      messages: []
-    }
+  const handleNewChat = async () => {
+    const newChat = await createNewChat()
     setChats(prev => [newChat, ...prev])
     setActiveChatId(newChat.id)
   }
 
-  const handleDeleteChat = (chatId: string) => {
+  const handleDeleteChat = async (chatId: string) => {
     if (editingChatId === chatId) {
       setEditingChatId(null)
       setEditingTitle("")
     }
     if (chats.length === 1) {
-      const newChat: Chat = {
-        id: Date.now().toString(),
-        title: "Новый чат",
-        messages: []
-      }
+      const newChat = await createNewChat()
       setChats([newChat])
       setActiveChatId(newChat.id)
       return
@@ -125,6 +159,7 @@ export default function HomePage() {
           chat.id === editingChatId ? { ...chat, title: trimmed } : chat
         )
       )
+      void updateSessionTitle(editingChatId, trimmed)
     }
     setEditingChatId(null)
     setEditingTitle("")
@@ -169,6 +204,16 @@ export default function HomePage() {
       ),
     )
     setInput("")
+
+    void saveMessage({
+      sessionId: activeChatId,
+      role: "user",
+      content: trimmed,
+    })
+
+    if (shouldAutoTitle) {
+      void updateSessionTitle(activeChatId, suggestedTitle)
+    }
 
     try {
       const history: ApiChatMessage[] = optimisticMessages
@@ -217,6 +262,13 @@ export default function HomePage() {
             : chat,
         ),
       )
+
+      void saveMessage({
+        sessionId: activeChatId,
+        role: "assistant",
+        content: assistantContent,
+        isTask: aiMessage.isTask,
+      })
     } catch (e) {
       const msg =
         e instanceof Error ? e.message : "Не удалось получить ответ от модели"
@@ -237,6 +289,12 @@ export default function HomePage() {
             : chat,
         ),
       )
+
+      void saveMessage({
+        sessionId: activeChatId,
+        role: "assistant",
+        content: errorMessage.content,
+      })
     } finally {
       setIsSending(false)
     }
@@ -278,6 +336,12 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen bg-background">
+      {isInitializing ? (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          Загрузка...
+        </div>
+      ) : (
+        <>
       {/* Sidebar */}
       <aside className="w-64 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
         <div className="p-3">
@@ -525,6 +589,8 @@ export default function HomePage() {
       </main>
 
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+        </>
+      )}
     </div>
   )
 }
