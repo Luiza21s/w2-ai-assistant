@@ -21,6 +21,16 @@ interface Chat {
   messages: Message[]
 }
 
+type ApiChatMessage = {
+  role: "system" | "user" | "assistant"
+  content: string
+}
+
+type ApiChatResponse = {
+  message?: { role?: string; content?: string } | null
+  error?: string
+}
+
 export default function HomePage() {
   const [chats, setChats] = useState<Chat[]>([
     { id: "1", title: "Новый чат", messages: [] }
@@ -32,6 +42,8 @@ export default function HomePage() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isDark, setIsDark] = useState(false)
+  const [isSending, setIsSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [editingChatId, setEditingChatId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -123,71 +135,108 @@ export default function HomePage() {
     setEditingTitle("")
   }
 
-  const handleSend = () => {
-    if (!input.trim() || !activeChat) return
+  const handleSend = async () => {
+    if (isSending) return
+
+    const trimmed = input.trim()
+    if (!trimmed || !activeChat) return
+
+    setSendError(null)
+    setIsSending(true)
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input
+      content: trimmed,
     }
 
     const isFirstMessage = activeChat.messages.length === 0
-    const newTitle = isFirstMessage ? input.slice(0, 30) + (input.length > 30 ? "..." : "") : activeChat.title
+    const suggestedTitle =
+      trimmed.slice(0, 30) + (trimmed.length > 30 ? "..." : "")
+    const shouldAutoTitle = isFirstMessage && activeChat.title === "Новый чат"
 
-    const updatedMessages = [...activeChat.messages, userMessage]
-    
-    setChats(prev => prev.map(chat => 
-      chat.id === activeChatId 
-        ? { ...chat, title: newTitle, messages: updatedMessages }
-        : chat
-    ))
+    const optimisticMessages = [...activeChat.messages, userMessage]
+
+    setChats(prev =>
+      prev.map(chat =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              title: shouldAutoTitle ? suggestedTitle : chat.title,
+              messages: optimisticMessages,
+            }
+          : chat,
+      ),
+    )
     setInput("")
 
-    setTimeout(() => {
-      const shouldGenerateTask = updatedMessages.length >= 4
+    try {
+      const history: ApiChatMessage[] = optimisticMessages
+        .slice(-20)
+        .map(m => ({
+          role: m.role,
+          content: m.content,
+        }))
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: trimmed,
+          history: history.slice(0, -1),
+        }),
+      })
+
+      const data = (await res.json()) as ApiChatResponse
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Ошибка API /api/chat")
+      }
+
+      const assistantContent = data?.message?.content?.trim()
+      if (!assistantContent) {
+        throw new Error("Пустой ответ от модели")
+      }
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: shouldGenerateTask 
-          ? generateTask(input)
-          : generateQuestion(updatedMessages.length),
-        isTask: shouldGenerateTask
+        content: assistantContent,
+        isTask:
+          assistantContent.startsWith("##") ||
+          assistantContent.includes("Критерии приёмки"),
       }
-      setChats(prev => prev.map(chat => 
-        chat.id === activeChatId 
-          ? { ...chat, messages: [...chat.messages, aiMessage] }
-          : chat
-      ))
-    }, 800)
-  }
 
-  const generateQuestion = (messageCount: number) => {
-    const questions = [
-      "Расскажите подробнее о функциональности. Кто будет основными пользователями этой фичи?",
-      "Какие критерии приёмки вы видите для этой задачи? Что должно работать, чтобы считать её выполненной?",
-      "Есть ли технические ограничения или зависимости, которые нужно учесть?"
-    ]
-    return questions[Math.min(Math.floor(messageCount / 2), questions.length - 1)]
-  }
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === activeChatId
+            ? { ...chat, messages: [...chat.messages, aiMessage] }
+            : chat,
+        ),
+      )
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Не удалось получить ответ от модели"
+      setSendError(msg)
 
-  const generateTask = (lastInput: string) => {
-    return `## Задача: Реализация функциональности
+      const errorMessage: Message = {
+        id: (Date.now() + 2).toString(),
+        role: "assistant",
+        content:
+          "Не получилось получить ответ от модели. Проверьте `OPENROUTER_API_KEY` и повторите.\n\n" +
+          `Текст ошибки: ${msg}`,
+      }
 
-**Описание:**
-На основе нашего обсуждения, необходимо реализовать функциональность согласно требованиям пользователя.
-
-**Критерии приёмки:**
-- [ ] Основной функционал работает корректно
-- [ ] Добавлены необходимые валидации
-- [ ] Покрыто unit-тестами
-- [ ] Задокументировано в README
-
-**Приоритет:** Средний
-**Оценка:** 3-5 дней
-
----
-*Выделите любой текст, чтобы уточнить или изменить формулировку*`
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === activeChatId
+            ? { ...chat, messages: [...chat.messages, errorMessage] }
+            : chat,
+        ),
+      )
+    } finally {
+      setIsSending(false)
+    }
   }
 
   const handleTextSelection = () => {
@@ -451,16 +500,23 @@ export default function HomePage() {
               />
               <Button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() || isSending}
                 size="icon"
                 className="absolute right-2 bottom-2"
               >
-                <Send className="h-4 w-4" />
+                <Send className={cn("h-4 w-4", isSending && "opacity-60")} />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Enter для отправки, Shift+Enter для новой строки
+              {isSending
+                ? "Отправка сообщения..."
+                : "Enter для отправки, Shift+Enter для новой строки"}
             </p>
+            {sendError && (
+              <p className="text-xs text-destructive mt-2 text-center">
+                {sendError}
+              </p>
+            )}
           </div>
         </div>
       </main>
