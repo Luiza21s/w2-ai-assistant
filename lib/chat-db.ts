@@ -163,6 +163,26 @@ export async function saveMessage(params: {
   }
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+}
+
+export async function deleteSession(sessionId: string): Promise<boolean> {
+  const supabase = getSupabase()
+  if (!supabase || !isUuid(sessionId)) return false
+
+  const { error } = await supabase.from("sessions").delete().eq("id", sessionId)
+
+  if (error) {
+    console.error("[Supabase] Failed to delete session:", error.message)
+    return false
+  }
+
+  return true
+}
+
 function createLocalChat(): LoadedChat {
   return {
     id: Date.now().toString(),

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
 import {
   createNewChatSession,
+  deleteSession,
   fetchMessagesForSession,
   loadInitialChats,
   persistActiveSessionId,
@@ -148,6 +149,9 @@ export default function HomePage() {
       setEditingChatId(null)
       setEditingTitle("")
     }
+
+    await deleteSession(chatId)
+
     if (chats.length === 1) {
       const newChat = await createNewChat()
       setChats([newChat])
