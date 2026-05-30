@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Plus, MessageSquare, Settings, Copy, Check, Send, Sparkles, PenLine, Pencil, Trash2, Moon, Sun } from "lucide-react"
+import { Plus, MessageSquare, Settings, Copy, Check, Send, Sparkles, PenLine, Pencil, Trash2, Moon, Sun, PanelLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,8 +15,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
+import { useIsMobile } from "@/hooks/use-mobile"
 import {
   createNewChatSession,
   deleteSession,
@@ -74,6 +80,9 @@ export default function HomePage() {
     id: string
     title: string
   } | null>(null)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
+  const isMobile = useIsMobile()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
@@ -381,6 +390,134 @@ export default function HomePage() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
+  const closeSidebar = () => {
+    if (isMobile) {
+      setMobileSidebarOpen(false)
+    }
+  }
+
+  const handleSelectChatAndClose = async (chatId: string) => {
+    await handleSelectChat(chatId)
+    closeSidebar()
+  }
+
+  const handleNewChatAndClose = async () => {
+    await handleNewChat()
+    closeSidebar()
+  }
+
+  const renderSidebarContent = (onNavigate?: () => void) => (
+    <>
+      <div className="p-3">
+        <Button
+          onClick={() => {
+            void handleNewChatAndClose()
+            onNavigate?.()
+          }}
+          variant="outline"
+          className="w-full justify-start gap-2 bg-sidebar-accent border-sidebar-border text-sidebar-foreground hover:bg-sidebar-accent/80"
+        >
+          <Plus className="h-4 w-4" />
+          Новый чат
+        </Button>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto px-2">
+        <div className="space-y-1">
+          {chats.map(chat => (
+            <div
+              key={chat.id}
+              className={cn(
+                "group flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors",
+                chat.id === activeChatId
+                  ? "bg-sidebar-accent text-sidebar-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50",
+              )}
+              onClick={() => {
+                void handleSelectChatAndClose(chat.id)
+                onNavigate?.()
+              }}
+            >
+              <MessageSquare className="h-4 w-4 flex-shrink-0" />
+              {editingChatId === chat.id ? (
+                <Input
+                  autoFocus
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      commitRenameChat()
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault()
+                      cancelRenameChat()
+                    }
+                  }}
+                  onBlur={commitRenameChat}
+                  className="h-7 flex-1 min-w-0 px-2 text-sm bg-sidebar border-sidebar-border"
+                />
+              ) : (
+                <span className="truncate flex-1">{chat.title}</span>
+              )}
+              {editingChatId !== chat.id && (
+                <div className="flex items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    title="Переименовать"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      startRenamingChat(chat.id, chat.title)
+                    }}
+                    className="p-1 hover:bg-sidebar-border rounded"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Удалить"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setChatToDelete({ id: chat.id, title: chat.title })
+                    }}
+                    className="p-1 hover:bg-sidebar-border rounded"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </nav>
+
+      <div className="p-3 border-t border-sidebar-border space-y-1">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+          onClick={toggleTheme}
+        >
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {isDark ? "Светлая тема" : "Тёмная тема"}
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+          onClick={() => {
+            setSettingsOpen(true)
+            onNavigate?.()
+            closeSidebar()
+          }}
+        >
+          <Settings className="h-4 w-4" />
+          Настройки
+        </Button>
+      </div>
+    </>
+  )
+
   return (
     <div className="flex h-screen bg-background">
       {isInitializing ? (
@@ -389,111 +526,57 @@ export default function HomePage() {
         </div>
       ) : (
         <>
-      {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
-        <div className="p-3">
-          <Button 
-            onClick={handleNewChat}
-            variant="outline" 
-            className="w-full justify-start gap-2 bg-sidebar-accent border-sidebar-border text-sidebar-foreground hover:bg-sidebar-accent/80"
-          >
-            <Plus className="h-4 w-4" />
-            Новый чат
-          </Button>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-2">
-          <div className="space-y-1">
-            {chats.map(chat => (
-              <div
-                key={chat.id}
-                className={cn(
-                  "group flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors",
-                  chat.id === activeChatId 
-                    ? "bg-sidebar-accent text-sidebar-foreground" 
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50"
-                )}
-                onClick={() => {
-                  void handleSelectChat(chat.id)
-                }}
-              >
-                <MessageSquare className="h-4 w-4 flex-shrink-0" />
-                {editingChatId === chat.id ? (
-                  <Input
-                    autoFocus
-                    value={editingTitle}
-                    onChange={(e) => setEditingTitle(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      e.stopPropagation()
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        commitRenameChat()
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault()
-                        cancelRenameChat()
-                      }
-                    }}
-                    onBlur={commitRenameChat}
-                    className="h-7 flex-1 min-w-0 px-2 text-sm bg-sidebar border-sidebar-border"
-                  />
-                ) : (
-                  <span className="truncate flex-1">{chat.title}</span>
-                )}
-                {editingChatId !== chat.id && (
-                  <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      title="Переименовать"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        startRenamingChat(chat.id, chat.title)
-                      }}
-                      className="p-1 hover:bg-sidebar-border rounded"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      title="Удалить"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setChatToDelete({ id: chat.id, title: chat.title })
-                      }}
-                      className="p-1 hover:bg-sidebar-border rounded"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </nav>
-
-        <div className="p-3 border-t border-sidebar-border space-y-1">
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-2 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-            onClick={toggleTheme}
-          >
-            {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {isDark ? "Светлая тема" : "Тёмная тема"}
-          </Button>
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-2 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="h-4 w-4" />
-            Настройки
-          </Button>
+      {/* Sidebar — desktop */}
+      <aside
+        className={cn(
+          "hidden md:flex w-64 flex-shrink-0 border-r border-border bg-sidebar flex-col",
+          !desktopSidebarOpen && "md:hidden",
+        )}
+      >
+        <div className="flex h-full flex-col overflow-hidden">
+          {renderSidebarContent()}
         </div>
       </aside>
 
+      {/* Sidebar — mobile sheet */}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent
+          side="left"
+          className="w-72 max-w-[85vw] p-0 bg-sidebar border-sidebar-border gap-0"
+        >
+          <SheetTitle className="sr-only">Список чатов</SheetTitle>
+          <div className="flex h-full flex-col overflow-hidden pt-2">
+            {renderSidebarContent(() => setMobileSidebarOpen(false))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={() => {
+              if (isMobile) {
+                setMobileSidebarOpen(true)
+              } else {
+                setDesktopSidebarOpen(prev => !prev)
+              }
+            }}
+            aria-label={
+              !isMobile && desktopSidebarOpen
+                ? "Скрыть меню чатов"
+                : "Открыть меню чатов"
+            }
+          >
+            <PanelLeft className="h-5 w-5" />
+          </Button>
+          <span className="truncate text-sm font-medium flex-1 min-w-0">
+            {activeChat?.title ?? "TaskAI"}
+          </span>
+        </div>
         {/* Chat Area */}
         <div 
           ref={chatContainerRef}
