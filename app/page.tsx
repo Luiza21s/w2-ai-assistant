@@ -178,12 +178,15 @@ export default function HomePage() {
           content: m.content,
         }))
 
+      const taskTemplate = localStorage.getItem("task-template")?.trim()
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: trimmed,
           history: history.slice(0, -1),
+          ...(taskTemplate ? { taskTemplate } : {}),
         }),
       })
 
