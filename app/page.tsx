@@ -7,8 +7,14 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { SettingsModal } from "@/components/settings-modal"
-import { createSession, saveMessage, updateSessionTitle } from "@/lib/chat-db"
-import { isSupabaseConfigured } from "@/lib/supabase"
+import {
+  createNewChatSession,
+  fetchMessagesForSession,
+  loadInitialChats,
+  persistActiveSessionId,
+  saveMessage,
+  updateSessionTitle,
+} from "@/lib/chat-db"
 
 interface Message {
   id: string
@@ -21,6 +27,7 @@ interface Chat {
   id: string
   title: string
   messages: Message[]
+  messagesLoaded: boolean
 }
 
 type ApiChatMessage = {
@@ -33,33 +40,15 @@ type ApiChatResponse = {
   error?: string
 }
 
-function createLocalChat(): Chat {
-  return {
-    id: Date.now().toString(),
-    title: "Новый чат",
-    messages: [],
-  }
-}
-
 async function createNewChat(): Promise<Chat> {
-  if (isSupabaseConfigured()) {
-    const session = await createSession("Новый чат")
-    if (session) {
-      return {
-        id: session.id,
-        title: session.title,
-        messages: [],
-      }
-    }
-  }
-
-  return createLocalChat()
+  return createNewChatSession()
 }
 
 export default function HomePage() {
   const [chats, setChats] = useState<Chat[]>([])
   const [activeChatId, setActiveChatId] = useState("")
   const [isInitializing, setIsInitializing] = useState(true)
+  const [isLoadingChat, setIsLoadingChat] = useState(false)
   const [input, setInput] = useState("")
   const [selectedText, setSelectedText] = useState("")
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null)
@@ -87,10 +76,10 @@ export default function HomePage() {
     let cancelled = false
 
     async function initChat() {
-      const chat = await createNewChat()
+      const { chats: loadedChats, activeId } = await loadInitialChats()
       if (cancelled) return
-      setChats([chat])
-      setActiveChatId(chat.id)
+      setChats(loadedChats)
+      setActiveChatId(activeId)
       setIsInitializing(false)
     }
 
@@ -123,6 +112,35 @@ export default function HomePage() {
     const newChat = await createNewChat()
     setChats(prev => [newChat, ...prev])
     setActiveChatId(newChat.id)
+    persistActiveSessionId(newChat.id)
+  }
+
+  const handleSelectChat = async (chatId: string) => {
+    if (editingChatId === chatId) return
+
+    const chat = chats.find(item => item.id === chatId)
+    if (!chat) return
+
+    if (chatId !== activeChatId) {
+      setActiveChatId(chatId)
+      persistActiveSessionId(chatId)
+    }
+
+    if (chat.messagesLoaded) return
+
+    setIsLoadingChat(true)
+    try {
+      const messages = await fetchMessagesForSession(chatId)
+      setChats(prev =>
+        prev.map(item =>
+          item.id === chatId
+            ? { ...item, messages, messagesLoaded: true }
+            : item,
+        ),
+      )
+    } finally {
+      setIsLoadingChat(false)
+    }
   }
 
   const handleDeleteChat = async (chatId: string) => {
@@ -134,13 +152,17 @@ export default function HomePage() {
       const newChat = await createNewChat()
       setChats([newChat])
       setActiveChatId(newChat.id)
+      persistActiveSessionId(newChat.id)
       return
     }
     setChats(prev => prev.filter(c => c.id !== chatId))
     if (activeChatId === chatId) {
       const remaining = chats.filter(c => c.id !== chatId)
       if (remaining.length > 0) {
-        setActiveChatId(remaining[0].id)
+        const nextChatId = remaining[0].id
+        setActiveChatId(nextChatId)
+        persistActiveSessionId(nextChatId)
+        void handleSelectChat(nextChatId)
       }
     }
   }
@@ -195,11 +217,12 @@ export default function HomePage() {
     setChats(prev =>
       prev.map(chat =>
         chat.id === activeChatId
-          ? {
-              ...chat,
-              title: shouldAutoTitle ? suggestedTitle : chat.title,
-              messages: optimisticMessages,
-            }
+              ? {
+                  ...chat,
+                  title: shouldAutoTitle ? suggestedTitle : chat.title,
+                  messages: optimisticMessages,
+                  messagesLoaded: true,
+                }
           : chat,
       ),
     )
@@ -367,7 +390,7 @@ export default function HomePage() {
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50"
                 )}
                 onClick={() => {
-                  if (editingChatId !== chat.id) setActiveChatId(chat.id)
+                  void handleSelectChat(chat.id)
                 }}
               >
                 <MessageSquare className="h-4 w-4 flex-shrink-0" />
@@ -453,7 +476,11 @@ export default function HomePage() {
           className="flex-1 overflow-y-auto"
           onMouseUp={handleTextSelection}
         >
-          {activeChat?.messages.length === 0 ? (
+          {isLoadingChat ? (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              Загрузка сообщений...
+            </div>
+          ) : activeChat?.messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6">
                 <Sparkles className="h-8 w-8 text-primary" />
