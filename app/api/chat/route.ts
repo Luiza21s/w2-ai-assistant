@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     ]
 
     const completion = await openai.chat.completions.create({
-      model: "meta-llama/llama-3.1-8b-instruct:free",
+      model: "google/gemma-3-4b-it:free",
       messages,
     })
 
